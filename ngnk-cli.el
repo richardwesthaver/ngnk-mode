@@ -26,7 +26,7 @@
 ;; Modeled on [[https://www.masteringemacs.org/article/comint-writing-command-interpreter]]
 ;;
 (require 'comint)
-(require 'cl-lib)
+(eval-when-compile (require 'cl-lib))
 
 (defgroup ngnk nil "ngn/k language editing mode."
   :group 'languages
@@ -36,43 +36,44 @@
   (or
    (executable-find "k")
    "k")
-  "Path to the program used by `run-ngnk'"
+  "Path to the program used by `run-ngnk'."
   :group 'ngnk
   :type 'string)
 
 (defcustom ngnk-cli-arguments '()
-  "Commandline arguments to pass to `ngnk-cli'"
+  "Commandline arguments to pass to `ngnk-cli'."
   :group 'ngnk
   :type '(repeat string))
 
 (defun ngnk-cli-args ()
   (or ngnk-cli-arguments
-      (let ((fpth (executable-find ngnk-cli-file-path)))
-        (if fpth
-            (let ((fpth (expand-file-name "repl.k" (file-name-directory fpth))))
-              (or (and (file-readable-p fpth) (list fpth)) nil))
-          nil))))
+      (when-let* ((fpth (executable-find ngnk-cli-file-path))
+		  (fpth (expand-file-name "repl.k" (file-name-directory fpth))))
+	(and (file-readable-p fpth) (list fpth)))))
 
 (defcustom ngnk-start-file ""
-  "Commandline arguments to pass to `ngnk-cli'"
+  "Commandline arguments to pass to `ngnk-cli'."
   :group 'ngnk
   :type 'string)
 
 (defun ngnk-sfile ()
-  (or (if (eq (length ngnk-start-file) 0)
-          nil
-        ngnk-start-file)))
+  (if (eq (length ngnk-start-file) 0)
+      nil
+    ngnk-start-file))
 
 (defcustom ngnk-max-output-length 0
-  "Maximum length of output printed"
+  "Maximum length of output printed."
   :group 'ngnk
   :type 'number)
+
+(defvar ngnk-buffer-limit ngnk-max-output-length)
 
 (defun ngnk-remove-marker (s)
   (cl-remove ?\a s))
 
 (defun ngnk-preout-filter (s)
-  "When ngnk-max-output-length is > 0, limit output to ngnk-max-output-length lines"
+  "When ngnk-max-output-length is > 0, limit output to
+ ngnk-max-output-length lines."
   (progn
     (if (not ngnk-buffer-limit)
         (setq ngnk-buffer-limit ngnk-max-output-length))
@@ -110,31 +111,37 @@
   :type 'string)
 
 (defcustom ngnk-mark-line-continuations nil
-  "Mark line continuations when sending a buffer"
+  "Mark line continuations when sending a buffer."
   :group 'ngnk
   :type 'boolean)
+
+(defcustom ngnk-buffer-name "*Ngnk*"
+  "Name of the process buffer for `run-ngnk'."
+  :group 'ngnk
+  :type 'string)
 
 (defvar ngnk-cli-map
   (let ((map (nconc (make-sparse-keymap) comint-mode-map)))
     ;; example definition
     (define-key map "\t" 'completion-at-point)
     map)
-  "Basic mode map for `run-ngnk'")
+  "Basic mode map for `run-ngnk'.")
 
-(setq ngnk-buffer-name "*Ngnk*")
 (defun ngnk-buffer ()
-    (get-buffer ngnk-buffer-name))
+  (get-buffer ngnk-buffer-name))
+
 (defun ngnk-buffer-proc ()
   (get-buffer-process (ngnk-buffer)))
+
 (defun ngnk-send-string (s)
   (comint-send-string (ngnk-buffer-proc) s))
 
 (defun ngnk-send-region (point mark)
+  "Send region to running ngn/k process."
   (interactive "^r")
-  "Send region to running ngn/k process"
   (let* ((s (concat (buffer-substring point mark) "\n"))
-       (idx (cl-search "\n" s))
-       (ret ""))
+	 (idx (cl-search "\n" s))
+	 (ret ""))
     (if ngnk-mark-line-continuations
         (progn
           (while idx
@@ -143,7 +150,7 @@
             (setq idx (cl-search "\n" s)))
           (setq s (concat ret s))
           (let ((end (- (length s) 1))
-                (chr nil))
+		chr)
             (while (or (eq (setq chr (aref s end)) ?\n)
                        (eq (setq chr (aref s end)) ?\a))
               (setq end (- end 1)))
@@ -153,33 +160,28 @@
 
 (defun ngnk-send-line-at-point (point)
   (interactive "p")
-  (ngnk-send-region (point-at-bol) (point-at-eol))
-  )
+  (ngnk-send-region (point-at-bol) (point-at-eol)))
 
 (defun ngnk-attach-proc (buffer)
-  "Attach ngn/k process to buffer"
-  (let* ((ngnk-program ngnk-cli-file-path))
-    (apply 'make-comint-in-buffer "Ngnk" buffer
-           ngnk-program (ngnk-sfile) (ngnk-cli-args))
+  "Attach ngn/k process to buffer."
+  (let ((ngnk-program ngnk-cli-file-path))
+    (make-comint-in-buffer "Ngnk" buffer ngnk-program
+			   (ngnk-sfile)
+			   (ngnk-cli-args))
     (ngnk-cli)))
 
 (defun run-ngnk ()
   "Run an inferior instance of `ngnk-cli' inside Emacs."
   (interactive)
-  (progn
-    ;; pop to the "*Ngnk*" buffer if the process is dead, the
-    ;; buffer is missing or it's got the wrong mode.
-    (if (not (comint-check-proc (current-buffer)))
-        (pop-to-buffer-same-window
-         (get-buffer-create ngnk-buffer-name)))
-
-    ;; create the comint process if there is no buffer.
-    (ngnk-attach-proc (current-buffer))))
+  ;; attach proc to the `ngnk-buffer-name' buffer if the process is dead.
+  (when (not (comint-check-proc ngnk-buffer-name))
+    (ngnk-attach-proc ngnk-buffer-name))
+  (pop-to-buffer-same-window ngnk-buffer-name))
 
 (defun ngnk--initialize ()
-  "Helper function to initialize Ngnk"
-  (setq comint-process-echoes t)
-  (setq comint-use-prompt-regexp nil)
+  "Helper function to initialize Ngnk."
+  (setq-local comint-process-echoes t)
+  (setq-local comint-use-prompt-regexp nil)
         (add-hook 'comint-preoutput-filter-functions
                   'ngnk-preout-filter nil t))
 
@@ -189,15 +191,16 @@
 \\<ngnk-cli-map>"
   nil "Ngnk"
   ;; this sets up the prompt so it matches things like: [foo@bar]
-  (setq comint-prompt-regexp ngnk-prompt-regexp)
+  (setq-local comint-prompt-regexp ngnk-prompt-regexp)
   ;; this makes it read only; a contentious subject as some prefer the
   ;; buffer to be overwritable.
-  (setq comint-prompt-read-only t)
+  (setq-local comint-prompt-read-only t)
   ;; this makes it so commands like M-{ and M-} work.
-  (set (make-local-variable 'paragraph-separate) "\\'")
-  (set (make-local-variable 'ngnk-buffer-limit) nil)
-;;  (set (make-local-variable 'font-lock-defaults) '(ngnk-font-lock-keywords t))
-  (set (make-local-variable 'paragraph-start) ngnk-prompt-regexp))
+  (setq-local paragraph-separate "\\'")
+  ;; (setq-local ngnk-buffer-limit nil)
+  ;;  (setq-local font-lock-defaults '(ngnk-font-lock-keywords t))
+  (setq-local paragraph-start ngnk-prompt-regexp))
+
 (add-hook 'ngnk-cli-hook 'ngnk--initialize)
 
 ;; (set (make-local-variable 'font-lock-defaults) '(ngnk-font-lock-keywords t))

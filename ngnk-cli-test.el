@@ -1,3 +1,5 @@
+;;; ngnk-cli-test.el --- ngnk-mode tests -*- lexical-binding: t; -*-
+(require 'ert)
 (require 'ngnk-cli)
 
 (ert-deftest ngnk-test-preout-filter ()
